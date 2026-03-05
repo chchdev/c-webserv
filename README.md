@@ -81,6 +81,16 @@ with `X-Shutdown-Token` when stopping.
 - If a URL maps to a directory, the server tries `index.html` in that directory
 - Requests outside `www` (for example via `..`) are blocked
 
+## PHP files
+
+- `.php` files in `www/` are executed through `php-cgi`
+- Example: `www/index.php` is available at `http://localhost:8080/index.php`
+- Query strings are forwarded (for example `/index.php?name=ben`)
+
+Requirement:
+
+- `php-cgi` (or `php-cgi.exe`) must be installed and available on your `PATH`
+
 ## Clean
 
 ```powershell

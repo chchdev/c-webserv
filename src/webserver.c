@@ -16,6 +16,10 @@
 #define FILE_PATH_SIZE 2048
 #define HEADER_VALUE_SIZE 256
 
+/* MinGW with -std=c11 can hide non-ANSI declarations for _popen/_pclose. */
+FILE *_popen(const char *command, const char *mode);
+int _pclose(FILE *stream);
+
 static int send_all(SOCKET socket, const char *data, int length) {
     int sent_total = 0;
     while (sent_total < length) {
@@ -96,8 +100,20 @@ static const char *get_content_type(const char *file_path) {
     if (equals_ignore_case(extension, ".svg")) {
         return "image/svg+xml";
     }
+    if (equals_ignore_case(extension, ".php")) {
+        return "text/html; charset=utf-8";
+    }
 
     return "application/octet-stream";
+}
+
+static int is_php_file(const char *file_path) {
+    const char *extension = strrchr(file_path, '.');
+    if (extension == NULL) {
+        return 0;
+    }
+
+    return equals_ignore_case(extension, ".php");
 }
 
 static int is_directory(const char *path) {
@@ -186,6 +202,22 @@ static void extract_request_path(const char *raw_target, char *path_out, size_t 
     path_out[i] = '\0';
 }
 
+static void extract_query_string(const char *raw_target, char *query_out, size_t query_out_size) {
+    const char *query_start = strchr(raw_target, '?');
+    if (query_start == NULL) {
+        query_out[0] = '\0';
+        return;
+    }
+
+    query_start++;
+    size_t i = 0;
+    while (query_start[i] != '\0' && query_start[i] != '#' && i < query_out_size - 1) {
+        query_out[i] = query_start[i];
+        i++;
+    }
+    query_out[i] = '\0';
+}
+
 static int read_header_value(const char *request, const char *header_name, char *value_out, size_t value_out_size) {
     char key[64];
     if (snprintf(key, sizeof(key), "\r\n%s:", header_name) < 0) {
@@ -210,6 +242,170 @@ static int read_header_value(const char *request, const char *header_name, char 
     value_out[i] = '\0';
 
     return i == 0 ? 1 : 0;
+}
+
+static int run_php_script(const char *file_path, const char *query_string, char **output, size_t *output_len) {
+    FILE *pipe = NULL;
+    char *buffer = NULL;
+    size_t used = 0;
+    size_t capacity = 0;
+
+    if (!SetEnvironmentVariableA("GATEWAY_INTERFACE", "CGI/1.1") ||
+        !SetEnvironmentVariableA("REQUEST_METHOD", "GET") ||
+        !SetEnvironmentVariableA("REDIRECT_STATUS", "200") ||
+        !SetEnvironmentVariableA("SCRIPT_FILENAME", file_path) ||
+        !SetEnvironmentVariableA("QUERY_STRING", query_string != NULL ? query_string : "") ||
+        !SetEnvironmentVariableA("CONTENT_LENGTH", "0") ||
+        !SetEnvironmentVariableA("CONTENT_TYPE", "")) {
+        return 1;
+    }
+
+    pipe = _popen("php-cgi.exe -q", "rb");
+    if (pipe == NULL) {
+        pipe = _popen("php-cgi -q", "rb");
+    }
+    if (pipe == NULL) {
+        return 1;
+    }
+
+    for (;;) {
+        if (used + FILE_BUFFER_SIZE + 1 > capacity) {
+            size_t new_capacity = capacity == 0 ? FILE_BUFFER_SIZE * 2 : capacity * 2;
+            while (new_capacity < used + FILE_BUFFER_SIZE + 1) {
+                new_capacity *= 2;
+            }
+
+            char *new_buffer = (char *)realloc(buffer, new_capacity);
+            if (new_buffer == NULL) {
+                free(buffer);
+                _pclose(pipe);
+                return 1;
+            }
+
+            buffer = new_buffer;
+            capacity = new_capacity;
+        }
+
+        size_t read_count = fread(buffer + used, 1, FILE_BUFFER_SIZE, pipe);
+        used += read_count;
+
+        if (read_count < FILE_BUFFER_SIZE) {
+            if (feof(pipe)) {
+                break;
+            }
+            if (ferror(pipe)) {
+                free(buffer);
+                _pclose(pipe);
+                return 1;
+            }
+        }
+    }
+
+    int close_code = _pclose(pipe);
+    if (close_code != 0) {
+        free(buffer);
+        return 1;
+    }
+
+    if (buffer == NULL) {
+        buffer = (char *)malloc(1);
+        if (buffer == NULL) {
+            return 1;
+        }
+        used = 0;
+    }
+
+    buffer[used] = '\0';
+    *output = buffer;
+    *output_len = used;
+    return 0;
+}
+
+static void send_php_response(SOCKET client_socket, const char *file_path, const char *query_string) {
+    char *php_output = NULL;
+    size_t php_output_len = 0;
+
+    if (run_php_script(file_path, query_string, &php_output, &php_output_len) != 0) {
+        send_text_response(client_socket, 500, "Internal Server Error", "500 PHP runtime error. Ensure php-cgi is installed and on PATH.\n");
+        return;
+    }
+
+    const char *content_type = "text/html; charset=utf-8";
+    char *body_ptr = php_output;
+    size_t body_len = php_output_len;
+
+    char *header_end = strstr(php_output, "\r\n\r\n");
+    size_t delimiter_len = 4;
+    if (header_end == NULL) {
+        header_end = strstr(php_output, "\n\n");
+        delimiter_len = 2;
+    }
+
+    if (header_end != NULL) {
+        *header_end = '\0';
+
+        char *content_type_line = strstr(php_output, "Content-type:");
+        if (content_type_line == NULL) {
+            content_type_line = strstr(php_output, "Content-Type:");
+        }
+
+        if (content_type_line != NULL) {
+            char *value_start = strchr(content_type_line, ':');
+            if (value_start != NULL) {
+                value_start++;
+                while (*value_start == ' ' || *value_start == '\t') {
+                    value_start++;
+                }
+
+                char *value_end = value_start;
+                while (*value_end != '\0' && *value_end != '\r' && *value_end != '\n') {
+                    value_end++;
+                }
+
+                *value_end = '\0';
+                if (*value_start != '\0') {
+                    content_type = value_start;
+                }
+            }
+        }
+
+        body_ptr = header_end + delimiter_len;
+        body_len = php_output_len - (size_t)(body_ptr - php_output);
+    }
+
+    char header[RESPONSE_BUFFER_SIZE];
+    int header_len = snprintf(
+        header,
+        sizeof(header),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: %s\r\n"
+        "Connection: close\r\n"
+        "Content-Length: %lu\r\n"
+        "\r\n",
+        content_type,
+        (unsigned long)php_output_len);
+
+    if (header_end != NULL) {
+        header_len = snprintf(
+            header,
+            sizeof(header),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: %s\r\n"
+            "Connection: close\r\n"
+            "Content-Length: %lu\r\n"
+            "\r\n",
+            content_type,
+            (unsigned long)body_len);
+    }
+
+    if (header_len > 0) {
+        send_all(client_socket, header, header_len);
+    }
+    if (body_len > 0) {
+        send_all(client_socket, body_ptr, (int)body_len);
+    }
+
+    free(php_output);
 }
 
 static void send_file_response(SOCKET client_socket, const char *file_path) {
@@ -373,6 +569,14 @@ static int handle_client(SOCKET client_socket, const char *shutdown_token) {
 
     if (!file_exists(file_path)) {
         send_text_response(client_socket, 404, "Not Found", "404 Not Found\n");
+        closesocket(client_socket);
+        return 1;
+    }
+
+    if (is_php_file(file_path)) {
+        char query_string[URL_PATH_SIZE];
+        extract_query_string(target, query_string, sizeof(query_string));
+        send_php_response(client_socket, file_path, query_string);
         closesocket(client_socket);
         return 1;
     }
