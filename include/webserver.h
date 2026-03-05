@@ -3,6 +3,6 @@
 
 #include <stdint.h>
 
-int run_server(uint16_t port);
+int run_server(uint16_t port, const char *shutdown_token);
 
 #endif

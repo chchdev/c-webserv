@@ -12,6 +12,8 @@ $IncludeDir = Join-Path $ProjectRoot "include"
 $BinDir = Join-Path $ProjectRoot "bin"
 $ServerOutputFile = Join-Path $BinDir "webserv.exe"
 $GuiOutputFile = Join-Path $BinDir "webserv-gui.exe"
+$RcFile = Join-Path $ProjectRoot "resources\app.rc"
+$RcObjectFile = Join-Path $BinDir "app_icon.o"
 
 if (-not (Test-Path $BinDir)) {
     New-Item -ItemType Directory -Path $BinDir | Out-Null
@@ -32,6 +34,10 @@ foreach ($SourceFile in ($ServerSources + $GuiSources)) {
     }
 }
 
+if (-not (Test-Path $RcFile)) {
+    throw "Missing resource file: $RcFile"
+}
+
 $Flags = @("-std=c11", "-Wall", "-Wextra", "-I$IncludeDir")
 if ($Configuration -eq "Debug") {
     $Flags += @("-g", "-O0")
@@ -47,7 +53,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Building c-webserv GUI ($Configuration) with $Compiler..."
-& $Compiler @Flags @GuiSources "-o" $GuiOutputFile "-mwindows"
+& windres $RcFile -O coff -o $RcObjectFile
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Resource compilation failed with exit code $LASTEXITCODE."
+}
+
+& $Compiler @Flags @GuiSources $RcObjectFile "-o" $GuiOutputFile "-mwindows" "-lws2_32"
 
 if ($LASTEXITCODE -ne 0) {
     throw "GUI build failed with exit code $LASTEXITCODE."

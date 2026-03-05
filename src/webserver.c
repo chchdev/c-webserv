@@ -14,6 +14,7 @@
 #define FILE_BUFFER_SIZE 8192
 #define URL_PATH_SIZE 1024
 #define FILE_PATH_SIZE 2048
+#define HEADER_VALUE_SIZE 256
 
 static int send_all(SOCKET socket, const char *data, int length) {
     int sent_total = 0;
@@ -176,6 +177,41 @@ static int resolve_www_path(const char *raw_target, char *resolved_path, size_t 
     return 0;
 }
 
+static void extract_request_path(const char *raw_target, char *path_out, size_t path_out_size) {
+    size_t i = 0;
+    while (raw_target[i] != '\0' && raw_target[i] != '?' && raw_target[i] != '#' && i < path_out_size - 1) {
+        path_out[i] = raw_target[i];
+        i++;
+    }
+    path_out[i] = '\0';
+}
+
+static int read_header_value(const char *request, const char *header_name, char *value_out, size_t value_out_size) {
+    char key[64];
+    if (snprintf(key, sizeof(key), "\r\n%s:", header_name) < 0) {
+        return 1;
+    }
+
+    const char *header_start = strstr(request, key);
+    if (header_start == NULL) {
+        return 1;
+    }
+
+    const char *value_start = header_start + strlen(key);
+    while (*value_start == ' ' || *value_start == '\t') {
+        value_start++;
+    }
+
+    size_t i = 0;
+    while (value_start[i] != '\0' && value_start[i] != '\r' && value_start[i] != '\n' && i < value_out_size - 1) {
+        value_out[i] = value_start[i];
+        i++;
+    }
+    value_out[i] = '\0';
+
+    return i == 0 ? 1 : 0;
+}
+
 static void send_file_response(SOCKET client_socket, const char *file_path) {
     FILE *file = fopen(file_path, "rb");
     if (file == NULL) {
@@ -279,13 +315,13 @@ static SOCKET create_listening_socket(uint16_t port) {
     return listen_socket;
 }
 
-static void handle_client(SOCKET client_socket) {
+static int handle_client(SOCKET client_socket, const char *shutdown_token) {
     char request_buffer[REQUEST_BUFFER_SIZE];
     int recv_result = recv(client_socket, request_buffer, (int)sizeof(request_buffer) - 1, 0);
 
     if (recv_result <= 0) {
         closesocket(client_socket);
-        return;
+        return 1;
     }
 
     request_buffer[recv_result] = '\0';
@@ -296,33 +332,57 @@ static void handle_client(SOCKET client_socket) {
     if (sscanf(request_buffer, "%15s %1023s", method, target) != 2) {
         send_text_response(client_socket, 400, "Bad Request", "400 Bad Request\n");
         closesocket(client_socket);
-        return;
+        return 1;
     }
 
     if (!equals_ignore_case(method, "GET")) {
         send_text_response(client_socket, 405, "Method Not Allowed", "405 Method Not Allowed\n");
         closesocket(client_socket);
-        return;
+        return 1;
+    }
+
+    char request_path[URL_PATH_SIZE];
+    extract_request_path(target, request_path, sizeof(request_path));
+
+    if (strcmp(request_path, "/__shutdown") == 0) {
+        if (shutdown_token == NULL || shutdown_token[0] == '\0') {
+            send_text_response(client_socket, 403, "Forbidden", "403 Forbidden\n");
+            closesocket(client_socket);
+            return 1;
+        }
+
+        char provided_token[HEADER_VALUE_SIZE];
+        if (read_header_value(request_buffer, "X-Shutdown-Token", provided_token, sizeof(provided_token)) != 0 ||
+            strcmp(provided_token, shutdown_token) != 0) {
+            send_text_response(client_socket, 403, "Forbidden", "403 Forbidden\n");
+            closesocket(client_socket);
+            return 1;
+        }
+
+        send_text_response(client_socket, 200, "OK", "Shutting down\n");
+        closesocket(client_socket);
+        return 0;
     }
 
     char file_path[FILE_PATH_SIZE];
     if (resolve_www_path(target, file_path, sizeof(file_path)) != 0) {
         send_text_response(client_socket, 400, "Bad Request", "400 Bad Request\n");
         closesocket(client_socket);
-        return;
+        return 1;
     }
 
     if (!file_exists(file_path)) {
         send_text_response(client_socket, 404, "Not Found", "404 Not Found\n");
         closesocket(client_socket);
-        return;
+        return 1;
     }
 
     send_file_response(client_socket, file_path);
     closesocket(client_socket);
+    return 1;
 }
 
-int run_server(uint16_t port) {
+int run_server(uint16_t port, const char *shutdown_token) {
     if (init_winsock() != 0) {
         return 1;
     }
@@ -335,6 +395,9 @@ int run_server(uint16_t port) {
 
     printf("c-webserv listening on http://localhost:%u\n", port);
     printf("Press Ctrl+C to stop the server.\n");
+    if (shutdown_token != NULL && shutdown_token[0] != '\0') {
+        printf("Graceful shutdown endpoint enabled at /__shutdown\n");
+    }
 
     for (;;) {
         SOCKET client_socket = accept(listen_socket, NULL, NULL);
@@ -343,7 +406,9 @@ int run_server(uint16_t port) {
             break;
         }
 
-        handle_client(client_socket);
+        if (!handle_client(client_socket, shutdown_token)) {
+            break;
+        }
     }
 
     closesocket(listen_socket);

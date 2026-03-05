@@ -67,8 +67,12 @@ You can run a Windows GUI to start/stop the server and set the port:
 Behavior:
 
 - `Start` launches `bin/webserv.exe` on the selected port
-- `Stop` terminates the running server process
+- `Stop` requests graceful shutdown and waits for clean exit
 - You can change the port while stopped, then start again
+- App icon is embedded in `webserv-gui.exe` from `assets/app.ico`
+
+The GUI starts the server with an internal shutdown token and calls `GET /__shutdown`
+with `X-Shutdown-Token` when stopping.
 
 ## Static files (`www`)
 
