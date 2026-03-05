@@ -10,7 +10,7 @@ Example: `www/healthyfitness` is available at `http://localhost:8080/healthyfitn
 - `src/` - C source files
 - `include/` - Header files
 - `build/` - PowerShell build scripts
-- `bin/` - Compiled output (`webserv.exe`)
+- `bin/` - Compiled output (`webserv.exe`, `webserv-gui.exe`)
 - `www/` - Static web root
 
 ## Build (PowerShell)
@@ -37,6 +37,7 @@ The build output is written to:
 
 ```text
 bin/webserv.exe
+bin/webserv-gui.exe
 ```
 
 ## Run
@@ -54,6 +55,20 @@ Custom port:
 ```
 
 Then open `http://localhost:8080` (or your chosen port) in a browser.
+
+## GUI control panel
+
+You can run a Windows GUI to start/stop the server and set the port:
+
+```powershell
+./bin/webserv-gui.exe
+```
+
+Behavior:
+
+- `Start` launches `bin/webserv.exe` on the selected port
+- `Stop` terminates the running server process
+- You can change the port while stopped, then start again
 
 ## Static files (`www`)
 

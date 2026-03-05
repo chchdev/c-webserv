@@ -10,15 +10,26 @@ $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $SrcDir = Join-Path $ProjectRoot "src"
 $IncludeDir = Join-Path $ProjectRoot "include"
 $BinDir = Join-Path $ProjectRoot "bin"
-$OutputFile = Join-Path $BinDir "webserv.exe"
+$ServerOutputFile = Join-Path $BinDir "webserv.exe"
+$GuiOutputFile = Join-Path $BinDir "webserv-gui.exe"
 
 if (-not (Test-Path $BinDir)) {
     New-Item -ItemType Directory -Path $BinDir | Out-Null
 }
 
-$Sources = Get-ChildItem -Path $SrcDir -Filter "*.c" | ForEach-Object { $_.FullName }
-if (-not $Sources) {
-    throw "No C source files found in '$SrcDir'."
+$ServerSources = @(
+    (Join-Path $SrcDir "main.c"),
+    (Join-Path $SrcDir "webserver.c")
+)
+
+$GuiSources = @(
+    (Join-Path $SrcDir "gui_main.c")
+)
+
+foreach ($SourceFile in ($ServerSources + $GuiSources)) {
+    if (-not (Test-Path $SourceFile)) {
+        throw "Missing source file: $SourceFile"
+    }
 }
 
 $Flags = @("-std=c11", "-Wall", "-Wextra", "-I$IncludeDir")
@@ -28,11 +39,19 @@ if ($Configuration -eq "Debug") {
     $Flags += @("-O2")
 }
 
-Write-Host "Building c-webserv ($Configuration) with $Compiler..."
-& $Compiler @Flags @Sources "-o" $OutputFile "-lws2_32"
+Write-Host "Building c-webserv server ($Configuration) with $Compiler..."
+& $Compiler @Flags @ServerSources "-o" $ServerOutputFile "-lws2_32"
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Build failed with exit code $LASTEXITCODE."
+    throw "Server build failed with exit code $LASTEXITCODE."
 }
 
-Write-Host "Build complete: $OutputFile"
+Write-Host "Building c-webserv GUI ($Configuration) with $Compiler..."
+& $Compiler @Flags @GuiSources "-o" $GuiOutputFile "-mwindows"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "GUI build failed with exit code $LASTEXITCODE."
+}
+
+Write-Host "Build complete: $ServerOutputFile"
+Write-Host "Build complete: $GuiOutputFile"
