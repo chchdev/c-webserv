@@ -43,6 +43,4 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            bin/webserv.exe
-            bin/webserv-gui.exe
             bin/installer/c-webserv-setup.exe
