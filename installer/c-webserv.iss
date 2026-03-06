@@ -2,7 +2,7 @@
 
 #define MyAppName "c-webserv"
 #define MyAppVersion "0.1.0"
-#define MyAppPublisher "c-webserv"
+#define MyAppPublisher "Ben Olds"
 #define MyAppExeName "webserv-gui.exe"
 
 [Setup]
