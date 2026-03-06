@@ -1,7 +1,7 @@
 ; Inno Setup script for c-webserv
 
 #define MyAppName "c-webserv"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "0.1.0"
 #define MyAppPublisher "c-webserv"
 #define MyAppExeName "webserv-gui.exe"
 
