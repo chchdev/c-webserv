@@ -33,12 +33,28 @@ Custom compiler command:
 ./build/build.ps1 -Compiler gcc
 ```
 
+Build installer (requires Inno Setup with `iscc` on `PATH`):
+
+```powershell
+./build/build-installer.ps1
+```
+
 The build output is written to:
 
 ```text
 bin/webserv.exe
 bin/webserv-gui.exe
+bin/installer/c-webserv-setup.exe
 ```
+
+## Installer
+
+- Installer script: `installer/c-webserv.iss`
+- Default install directory: `C:\Program Files\c-webserv\`
+- Installed runtime layout includes:
+	- `bin/webserv.exe`
+	- `bin/webserv-gui.exe`
+	- `www/` (created by default and populated from project `www/`)
 
 ## Run
 

@@ -6,6 +6,7 @@
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 
 #include "webserver.h"
 
@@ -19,6 +20,8 @@
 /* MinGW with -std=c11 can hide non-ANSI declarations for _popen/_pclose. */
 FILE *_popen(const char *command, const char *mode);
 int _pclose(FILE *stream);
+
+static char g_web_root[FILE_PATH_SIZE] = "www";
 
 static int send_all(SOCKET socket, const char *data, int length) {
     int sent_total = 0;
@@ -125,6 +128,39 @@ static int is_directory(const char *path) {
     return (info.st_mode & S_IFDIR) != 0;
 }
 
+static void initialize_web_root(void) {
+    char exe_path[FILE_PATH_SIZE];
+    if (GetModuleFileNameA(NULL, exe_path, (DWORD)sizeof(exe_path)) == 0) {
+        return;
+    }
+
+    char *last_sep = strrchr(exe_path, '\\');
+    if (last_sep == NULL) {
+        return;
+    }
+    *last_sep = '\0';
+
+    char bin_dir[FILE_PATH_SIZE];
+    if (snprintf(bin_dir, sizeof(bin_dir), "%s", exe_path) < 0) {
+        return;
+    }
+
+    char *bin_parent_sep = strrchr(bin_dir, '\\');
+    if (bin_parent_sep != NULL) {
+        *bin_parent_sep = '\0';
+        char candidate_root[FILE_PATH_SIZE];
+        if (snprintf(candidate_root, sizeof(candidate_root), "%s\\www", bin_dir) >= 0 && is_directory(candidate_root)) {
+            snprintf(g_web_root, sizeof(g_web_root), "%s", candidate_root);
+            return;
+        }
+    }
+
+    char local_candidate[FILE_PATH_SIZE];
+    if (snprintf(local_candidate, sizeof(local_candidate), "%s\\www", exe_path) >= 0 && is_directory(local_candidate)) {
+        snprintf(g_web_root, sizeof(g_web_root), "%s", local_candidate);
+    }
+}
+
 static int file_exists(const char *path) {
     struct stat info;
     if (stat(path, &info) != 0) {
@@ -172,10 +208,10 @@ static int resolve_www_path(const char *raw_target, char *resolved_path, size_t 
     }
 
     if (strcmp(cleaned_target, "\\") == 0) {
-        return snprintf(resolved_path, resolved_path_size, "www\\index.html") < 0;
+        return snprintf(resolved_path, resolved_path_size, "%s\\index.html", g_web_root) < 0;
     }
 
-    if (snprintf(resolved_path, resolved_path_size, "www%s", cleaned_target) < 0) {
+    if (snprintf(resolved_path, resolved_path_size, "%s%s", g_web_root, cleaned_target) < 0) {
         return 1;
     }
 
@@ -591,6 +627,8 @@ int run_server(uint16_t port, const char *shutdown_token) {
         return 1;
     }
 
+    initialize_web_root();
+
     SOCKET listen_socket = create_listening_socket(port);
     if (listen_socket == INVALID_SOCKET) {
         WSACleanup();
@@ -598,6 +636,7 @@ int run_server(uint16_t port, const char *shutdown_token) {
     }
 
     printf("c-webserv listening on http://localhost:%u\n", port);
+    printf("Web root: %s\n", g_web_root);
     printf("Press Ctrl+C to stop the server.\n");
     if (shutdown_token != NULL && shutdown_token[0] != '\0') {
         printf("Graceful shutdown endpoint enabled at /__shutdown\n");
