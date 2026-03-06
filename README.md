@@ -70,6 +70,7 @@ Behavior:
 - `Stop` requests graceful shutdown and waits for clean exit
 - You can change the port while stopped, then start again
 - App icon is embedded in `webserv-gui.exe` from `assets/app.ico`
+- Server runs in the background when started from the GUI (no CMD window)
 
 The GUI starts the server with an internal shutdown token and calls `GET /__shutdown`
 with `X-Shutdown-Token` when stopping.

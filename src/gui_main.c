@@ -392,6 +392,8 @@ static void start_server_process(void) {
     STARTUPINFOA startup_info;
     ZeroMemory(&startup_info, sizeof(startup_info));
     startup_info.cb = sizeof(startup_info);
+    startup_info.dwFlags = STARTF_USESHOWWINDOW;
+    startup_info.wShowWindow = SW_HIDE;
 
     PROCESS_INFORMATION process_info;
     ZeroMemory(&process_info, sizeof(process_info));
@@ -402,7 +404,7 @@ static void start_server_process(void) {
             NULL,
             NULL,
             FALSE,
-            CREATE_NEW_PROCESS_GROUP,
+            CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
             NULL,
             bin_dir,
             &startup_info,
